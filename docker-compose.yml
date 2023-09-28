@@ -1,0 +1,26 @@
+version: '3'
+
+services:
+  app:
+    build:
+      context: .
+    image: bw-devops-exercise
+    environment:
+      BW_MESSAGE: "Hello from docker-compose"
+    expose:
+      - "8080"
+    networks:
+      - bwexercise
+
+  nginx:
+    image: nginx
+    ports:
+      - 8081:8081
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf
+    networks:
+      - bwexercise
+
+networks:
+  bwexercise:
+    driver: bridge
