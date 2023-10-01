@@ -1,0 +1,100 @@
+---
+name: Merge To Main
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  main-merge:
+    name: Increment Version, Build Docker
+    runs-on: ubuntu-22.04
+    permissions: write-all
+    steps:
+      - name: Checkout Latest
+        uses: actions/checkout@f43a0e5ff2bd294095638e18286ca9a3d1956744
+        with:
+          fetch-depth: 0
+
+      - name: Read Version
+        run: |
+          echo 'BASE_VERSION<<EOF' >> $GITHUB_ENV
+          cat ./version.json >> $GITHUB_ENV
+          echo 'EOF' >> $GITHUB_ENV
+
+      - name: Parse Semvers
+        run: |
+          base_version="${{ fromJSON(env.BASE_VERSION).baseVersion }}"
+          major=$(echo $base_version | awk -F \. {'print $1'})
+          minor=$(echo $base_version | awk -F \. {'print $2'})
+          echo "CURRENT_MAJOR=$major" >> $GITHUB_ENV
+          echo "CURRENT_MINOR=$minor" >> $GITHUB_ENV
+
+      - name: 'Get Previous tag'
+        id: previoustag
+        uses: WyriHaximus/github-action-get-previous-tag@385a2a0b6abf6c2efeb95adfac83d96d6f968e0c
+        with:
+          fallback: 0.0.0
+
+      - name: 'Get next version'
+        id: semvers
+        uses: WyriHaximus/github-action-next-semvers@d079934efaf011a4cf8912d4637097fe35d32b93
+        with:
+          version: ${{ steps.previoustag.outputs.tag }}
+
+      - name: Determine Current Version And Write to version.json
+        run: |
+          prev_tag=${{ steps.previoustag.outputs.tag }}
+          prev_tag="${prev_tag:1}"
+          major=$(echo $prev_tag | awk -F \. {'print $1'})
+          minor=$(echo $prev_tag | awk -F \. {'print $2'})
+
+          if [[ $CURRENT_MAJOR -ne $major ]]; then
+            version=${{ steps.semvers.outputs.major }}
+          elif [[ $CURRENT_MINOR -ne $minor ]]; then
+            version=${{ steps.semvers.outputs.minor }}
+          else
+            version=${{ steps.semvers.outputs.patch }}
+          fi
+
+          echo "VERSION=${version}" >> $GITHUB_ENV
+          echo "{" > version.json
+          echo "    \"baseVersion\": \"${{ fromJSON(env.BASE_VERSION).baseVersion }}\"" >> version.json
+          echo "    \"version\": \"${version}\"" >> version.json
+          echo "}" >> version.json
+
+      - name: Log in to Container Registry
+        uses: docker/login-action@65b78e6e13532edd9afa3aa52ac7964289d1a9c1
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata (tags, labels) for Docker
+        id: meta
+        uses: docker/metadata-action@9ec57ed1fcdbf14dcef7dfbe97b2010124a938b7
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: type=semver,pattern={{version}},value=${{ env.VERSION }}
+
+      - name: Build and Push
+        uses: docker/build-push-action@3b5e8027fcad23fda98b2e3ac259d8d67585f671
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+
+      - name: Tag Commit
+        uses: mathieudutour/github-tag-action@fcfbdceb3093f6d85a3b194740f8c6cec632f4e2
+        id: tag_version
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          custom_tag: ${{ env.VERSION }}
+
+      - name: Create GitHub Release
+        uses: ncipollo/release-action@6c75be85e571768fa31b40abf38de58ba0397db5
+        with:
+          tag: ${{ steps.tag_version.outputs.new_tag }}
+          name: Release ${{ steps.tag_version.outputs.new_tag }}
+          body: ${{ steps.tag_version.outputs.changelog }}
