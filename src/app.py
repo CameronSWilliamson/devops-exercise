@@ -17,6 +17,10 @@ def add_message(response: dict, msg: str) -> dict:
 def root():
     return add_message({}, "Hi from Bitwarden DevOps!")
 
+@app.get("/test")
+def test():
+    return add_message({}, "This is a test")
+
 
 @app.get("/custom")
 def custom():
